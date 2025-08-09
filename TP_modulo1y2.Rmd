@@ -1,0 +1,29 @@
+---
+title: "TP Modulo I y II"
+author: "Agustin y Candela"
+date: "2025-08-09"
+output: html_document
+editor_options: 
+  markdown: 
+    wrap: 72
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+------------------------------------------------------------------------
+
+```{r setup, include=FALSE} library(tidyverse) library(readxl)
+```
+
+{r setup, include=FALSE} salario_privado \<-
+read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total
+sector privado")
+
+salario_publico \<- read_excel("Salario-promedio-por-departamento.xlsx",
+sheet = "Total sector público")
+
+salario_total_empresas \<-
+read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total
+empresas")
