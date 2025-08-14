@@ -1,0 +1,215 @@
+---
+title: "TP 1y2"
+author: "Cande y agus"
+date: "2025-08-12"
+output: html_document
+---
+
+```{r}
+setwd("C:/Users/agusr/Desktop/Diplo CSCyHD")
+getwd()
+```
+
+Cargamos librerías
+
+```{r }
+# Paquetes
+library(data.table)
+library(dplyr)
+library(lubridate)
+library(readxl)
+library(ggplot2)
+library(plotly)
+library(sf)
+library(tmap)
+library(scales)
+# Performance: permitir usar todos los cores
+data.table::setDTthreads(0)
+norm_dep <- function(x) sprintf("%05d", as.integer(x))
+```
+
+# ============================
+# 1) FUNCION FECHAS
+# ============================
+
+
+```{r}
+
+parse_ym <- function(x){
+  x <- as.character(x)
+  out <- rep(NA_character_, length(x))
+  sel_date <- grepl("^\\d{4}-\\d{2}-\\d{2}$", x)
+  out[sel_date] <- x[sel_date]
+  sel_ym <- grepl("^\\d{4}[-/]?\\d{2}$", x) & !grepl("^\\d{4}$", x)
+  out[sel_ym] <- paste0(sub("[-/]", "-", x[sel_ym]), "-01")
+  sel_yymm <- grepl("^\\d{6}$", x)
+  out[sel_yymm] <- paste0(substr(x[sel_yymm],1,4), "-", substr(x[sel_yymm],5,6), "-01")
+  sel_yyyy <- grepl("^\\d{4}$", x)
+  out[sel_yyyy] <- paste0(x[sel_yyyy], "-01-01")
+  as.Date(out)
+}
+```
+
+# ============================
+# 2) LEER SALARIOS (w_dt) 
+# ============================
+```{r}
+cols_needed <- c("fecha", "codigo_departamento_indec", "id_provincia_indec", "letra", "w_mean")
+w_dt <- fread("w_mean_depto_tot_emp_letra.csv", select = cols_needed, na.strings = c("","NA","NaN"))
+w_dt[, fecha := parse_ym(fecha)]
+# Convertir códigos de error a NA
+w_dt[w_mean <=0, w_mean := NA_real_]
+
+```
+
+# ============================
+# 3) Merge IPC ya indexado y deflactar salarios
+# ============================
+```{r}
+
+# 1) Leer IPC
+ipc <- read_excel("ipc.xlsx") %>% 
+  rename(ipc_varm = 2) %>%
+  mutate(fecha = as.Date(fecha)) %>%
+  arrange(fecha)  # de más antiguo a más reciente
+
+
+# Asegurar data.tables
+setDT(w_dt)
+setDT(ipc)
+
+# Eliminar columna por si existe de corridas previas
+w_dt[, idx_jun2025 := NULL]
+
+# Merge por fecha, usando el índice ya calculado en Excel
+setkey(w_dt, fecha)
+setkey(ipc, fecha)
+w_dt <- merge(w_dt, ipc[, .(fecha, idxjun25)], by = "fecha", all.x = TRUE)
+
+# Deflactar salarios a precios de junio 2025
+w_dt[, w_mean_const := w_mean / (idxjun25 / 100)]
+
+```
+# ============================
+# 4) Diccionario de letras 
+# ============================
+```{r}
+dicc_clae <- fread("diccionario_clae2.csv") %>%
+  select(letra, letra_desc) %>% distinct()
+w_dt <- left_join(w_dt, dicc_clae, by = "letra")
+```
+# ============================
+# 5) Promedios por depto y país
+# ============================
+```{r}
+
+# Salario mensual por departamento
+w_depto_mensual <- w_dt[, .(
+  salario_depto = mean(w_mean_const, na.rm = TRUE)
+), by = .(fecha, codigo_departamento_indec, id_provincia_indec)]
+
+# Promedio histórico por departamento
+dept_promedio <- w_depto_mensual[, .(
+  salario_promedio_depto = mean(salario_depto, na.rm = TRUE)
+), by = codigo_departamento_indec] 
+
+# Promedio nacional mensual
+salario_pais_mensual <- w_depto_mensual[, .(
+  salario_pais = mean(salario_depto, na.rm = TRUE)
+), by = fecha]
+
+
+```
+# ============================
+# 6) Mapa coroplético
+# ============================
+
+```{r}
+shape <- st_read("departamentos_arg2025.geojson", quiet = TRUE) %>% 
+  st_make_valid() %>% 
+  mutate(codigo_departamento_indec = sprintf("%05d", as.integer(codigo_departamento_indec)))
+
+# Asegurarse de que dept_promedio tenga mismo formato
+dept_promedio$codigo_departamento_indec <- sprintf("%05d", as.integer(dept_promedio$codigo_departamento_indec))
+
+shape <- st_simplify(shape, dTolerance = 1000)  # valor en metros, ajustá según escala
+
+# ----------------------------
+#$Merge con salario promedio por depto
+# ----------------------------
+shape_joined <- left_join(shape, dept_promedio, by = "codigo_departamento_indec")
+
+# ----------------------------
+# 3) Modo view y mapa interactivo
+# ----------------------------
+tmap_mode("view")
+
+tm_shape(shape_joined) +
+  tm_polygons("salario_promedio_depto",
+              palette = "YlOrRd",
+              title = "Salario real (Jun 2025)",
+              popup.vars = c("codigo_departamento_indec", "salario_promedio_depto")) +
+  tm_basemap("OpenStreetMap")
+
+```
+
+# ============================
+# 7) 5 sectores con salarios más bajos
+# ============================
+
+```{r}
+sector_means <- w_dt[, .(
+  salario_promedio_letra = mean(w_mean_const, na.rm = TRUE)
+), by = .(letra, letra_desc)][order(salario_promedio_letra)]
+
+p_barras <- ggplot(head(sector_means, 5), aes(x = reorder(letra_desc, salario_promedio_letra),
+                                              y = salario_promedio_letra,
+                                              fill = letra_desc,
+                                              text = paste("Sector:", letra_desc,
+                                                           "<br>Salario:", round(salario_promedio_letra, 2)))) +
+  geom_col() +
+  coord_flip() +
+  labs(title = "5 sectores con salarios más bajos",
+       y = "Salario promedio (Jun 2025)", x = "") +
+  theme_minimal() +
+  theme(legend.position = "none")
+
+ggplotly(p_barras, tooltip = "text")
+
+```
+# ============================
+# 8) Evolución 4 sectores seleccionados vs promedio nacional
+# ============================
+```{r}
+# Definir sectores de interés
+sectores_sel <- c("A","B","C","D")  # reemplazá con las letras de tus sectores
+
+# Calcular promedio mensual por sector
+serie_letra_fecha <- w_dt[letra %in% sectores_sel, .(
+  salario_letra = mean(w_mean_const, na.rm = TRUE)
+), by = .(fecha, letra)] %>%
+  left_join(salario_pais_mensual, by = "fecha") %>%
+  mutate(ratio = salario_letra / salario_pais) %>%
+  left_join(dicc_clae, by = "letra")  # para agregar letra_desc
+serie_letra_fecha <- left_join(serie_letra_fecha, dicc_clae, by = "letra")
+serie_letra_fecha$letra_desc <- serie_letra_fecha$letra_desc.y
+serie_letra_fecha$letra_desc.x <- NULL
+serie_letra_fecha$letra_desc.y <- NULL
+
+p_lineas <- ggplot(serie_letra_fecha, 
+                   aes(x = fecha, y = ratio, color = letra_desc, group = letra_desc,
+                       text = paste("Fecha:", fecha,
+                                    "<br>Sector:", letra_desc,
+                                    "<br>Ratio:", round(ratio,2)))) +
+  geom_line(linewidth = 1.5) +
+  geom_hline(yintercept = 1, linetype = "dashed") +
+  labs(title = "Evolución salarios / promedio nacional",
+       subtitle = "A precios constantes de Junio 2025",
+       x = "", y = "Ratio") +
+  theme_minimal()
+
+ggplotly(p_lineas, tooltip = "text")
+
+
+```
+

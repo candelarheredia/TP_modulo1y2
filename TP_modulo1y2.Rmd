@@ -2,28 +2,124 @@
 title: "TP Modulo I y II"
 author: "Agustin y Candela"
 date: "2025-08-09"
-output: html_document
-editor_options: 
-  markdown: 
+output:
+  html_document: default
+  pdf_document: default
+editor_options:
+  markdown:
     wrap: 72
 ---
 
+```{r}
+setwd("C:/Users/agusr/Desktop/Diplo CSCyHD")
+getwd()
+```
+
+Cargamos librerías
+
+```{r}
+library(readxl)
+library(dplyr)
+library(leaflet)
+library(sf)
+library(ggplot2)
+library(tidyr)
+library(scales)
+```
+
+Cargamos las bases
+
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+
+
+privado <- read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total sector privado")
+publico <- read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total sector público")
+formal <- read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total sector formal")
+total_empresas <- read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total empresas")
+
 ```
 
-------------------------------------------------------------------------
+Mapa coroplético: Departamentos con mayores salarios
 
-```{r setup, include=FALSE} library(tidyverse) library(readxl)
+```{r}
+
+df_promedio <- total_empresas %>%
+  rowwise() %>% #rowwise() Le dice a dplyr que las operaciones dentro de mutate() deben                        #calcularse fila por fila (y no por columna como es habitual).
+  mutate(salario_promedio = mean(c_across(m201401:m201710), na.rm = TRUE)) %>% #formato para calculo horizontal, por fila para el calculo de promedio de provincias y departamentos para el total de los trimestres
+  ungroup()
+
+
+
+
+
+# Leer, reparar y simplificar
+ba_shape <- st_read("departamentos_arg2025.geojson", quiet = TRUE) %>%
+  st_make_valid() %>%
+  st_simplify(dTolerance = 200, preserveTopology = TRUE)
+
+# Guardar como GeoPackage (más liviano y rápido)
+st_write(ba_shape, "departamentos_ba.gpkg", driver = "GPKG", delete_dsn = TRUE)
+
+# Leer el archivo liviano
+ba_shape <- st_read("departamentos_ba.gpkg", quiet = TRUE)
+
+# Unir shapefile con salarios
+mapa_ba <- ba_shape %>%
+  left_join(df_promedio, by = c("departamen" = "departamento"))
+
+# Definir paleta de colores
+pal <- colorNumeric(
+  palette = "YlOrRd",
+  domain = mapa_ba$salario_promedio
+)
+
+# Mapa interactivo (solo una vez)
+leaflet(mapa_ba) %>%
+  addTiles() %>%
+  addPolygons(
+    fillColor = ~pal(salario_promedio),
+    color = "black",
+    weight = 1,
+    fillOpacity = 0.7,
+    popup = ~paste0(
+      "<strong>", departamen, "</strong><br>",
+      "Salario promedio: ", dollar(salario_promedio, accuracy = 1)
+    )
+  ) %>%
+  addLegend(
+    pal = pal,
+    values = mapa_ba$salario_promedio,
+    title = "Salario promedio",
+    labFormat = labelFormat(prefix = "$", digits = 0)
+  )
+
+
 ```
 
-{r setup, include=FALSE} salario_privado \<-
-read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total
-sector privado")
+Gráfico coroplético
 
-salario_publico \<- read_excel("Salario-promedio-por-departamento.xlsx",
-sheet = "Total sector público")
+```{r}
+pal <- colorNumeric(
+  palette = "YlOrRd",
+  domain = mapa_ba$salario_promedio)
 
-salario_total_empresas \<-
-read_excel("Salario-promedio-por-departamento.xlsx", sheet = "Total
-empresas")
+leaflet(mapa_ba) %>%
+  addTiles() %>%
+  addPolygons(
+    fillColor = ~colorNumeric("YlOrRd", salario_promedio)(salario_promedio),
+    color = "black",
+    weight = 1,
+    fillOpacity = 0.7,
+    popup = ~paste0(
+      "<strong>", departamen, "</strong><br>",
+      "Salario promedio: ", dollar(salario_promedio, accuracy = 1)
+    )
+  ) %>%
+  addLegend(
+    pal = colorNumeric("YlOrRd", mapa_ba$salario_promedio),
+    values = mapa_ba$salario_promedio,
+    title = "Salario promedio",
+    labFormat = labelFormat(prefix = "$", digits = 0)
+  )
+
+```
