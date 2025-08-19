@@ -5,14 +5,14 @@ date: "2025-08-12"
 output: html_document
 ---
 
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 setwd("C:/Users/agusr/Desktop/Diplo CSCyHD")
 getwd()
 ```
 
 Cargamos librerías
 
-```{r }
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Paquetes
 library(data.table)
 library(dplyr)
@@ -28,12 +28,15 @@ data.table::setDTthreads(0)
 norm_dep <- function(x) sprintf("%05d", as.integer(x))
 ```
 
+Carga todos los paquetes necesarios para manejo de datos, fechas, gráficos y mapas. Además, activa todos los núcleos para data.table y define funciones auxiliares (como norm_dep)
+
 # ============================
+
 # 1) FUNCION FECHAS
+
 # ============================
 
-
-```{r}
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 parse_ym <- function(x){
   x <- as.character(x)
@@ -50,10 +53,15 @@ parse_ym <- function(x){
 }
 ```
 
+Convierte fechas en distintos formatos (YYYYMM, YYYY-MM, YYYY) a un objeto Date estándar, asegurando consistencia temporal en los análisis.
+
 # ============================
-# 2) LEER SALARIOS (w_dt) 
+
+# 2) LEER SALARIOS (w_dt)
+
 # ============================
-```{r}
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 cols_needed <- c("fecha", "codigo_departamento_indec", "id_provincia_indec", "letra", "w_mean")
 w_dt <- fread("w_mean_depto_tot_emp_letra.csv", select = cols_needed, na.strings = c("","NA","NaN"))
 w_dt[, fecha := parse_ym(fecha)]
@@ -62,10 +70,15 @@ w_dt[w_mean <=0, w_mean := NA_real_]
 
 ```
 
+Carga datos de salarios por departamento y sector. Convierte valores inválidos o negativos en NA y aplica la función parse_ym para estandarizar fechas.
+
 # ============================
+
 # 3) Merge IPC ya indexado y deflactar salarios
+
 # ============================
-```{r}
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 # 1) Leer IPC
 ipc <- read_excel("ipc.xlsx") %>% 
@@ -90,18 +103,30 @@ w_dt <- merge(w_dt, ipc[, .(fecha, idxjun25)], by = "fecha", all.x = TRUE)
 w_dt[, w_mean_const := w_mean / (idxjun25 / 100)]
 
 ```
+
+Importa el índice de precios (IPC), lo combina con los salarios y calcula los salarios constantes (precios de junio 2025), para poder comparar valores a lo largo del tiempo.
+
 # ============================
-# 4) Diccionario de letras 
+
+# 4) Diccionario de letras
+
 # ============================
-```{r}
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 dicc_clae <- fread("diccionario_clae2.csv") %>%
   select(letra, letra_desc) %>% distinct()
 w_dt <- left_join(w_dt, dicc_clae, by = "letra")
 ```
+
+Se agregan descripciones de los sectores económicos a partir del código de letra (letra) para facilitar la interpretación de los gráficos.
+
 # ============================
+
 # 5) Promedios por depto y país
+
 # ============================
-```{r}
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 
 # Salario mensual por departamento
 w_depto_mensual <- w_dt[, .(
@@ -120,11 +145,22 @@ salario_pais_mensual <- w_depto_mensual[, .(
 
 
 ```
-# ============================
-# 6) Mapa coroplético
+
+Calcula:
+
+Salario mensual promedio por departamento.
+
+Salario promedio histórico por departamento.
+
+Salario promedio nacional mensual, que sirve como referencia para los ratios de sectores
+
 # ============================
 
-```{r}
+# 6) Mapa coroplético
+
+# ============================
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 shape <- st_read("departamentos_arg2025.geojson", quiet = TRUE) %>% 
   st_make_valid() %>% 
   mutate(codigo_departamento_indec = sprintf("%05d", as.integer(codigo_departamento_indec)))
@@ -153,11 +189,19 @@ tm_shape(shape_joined) +
 
 ```
 
-# ============================
-# 7) 5 sectores con salarios más bajos
+Carga y simplifica el shapefile de departamentos.
+
+Une la geometría con los salarios promedio por departamento.
+
+Crea un mapa interactivo (tmap) mostrando el salario real de cada departamento.
+
 # ============================
 
-```{r}
+# 7) 5 sectores con salarios más bajos
+
+# ============================
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 sector_means <- w_dt[, .(
   salario_promedio_letra = mean(w_mean_const, na.rm = TRUE)
 ), by = .(letra, letra_desc)][order(salario_promedio_letra)]
@@ -177,10 +221,20 @@ p_barras <- ggplot(head(sector_means, 5), aes(x = reorder(letra_desc, salario_pr
 ggplotly(p_barras, tooltip = "text")
 
 ```
+
+Calcula el salario promedio por sector.
+
+Genera un gráfico de barras horizontales con los 5 sectores más bajos.
+
+Tooltip interactivo muestra sector y salario.
+
 # ============================
+
 # 8) Evolución 4 sectores seleccionados vs promedio nacional
+
 # ============================
-```{r}
+
+```{r echo=TRUE, message=FALSE, warning=FALSE, paged.print=FALSE}
 # Definir sectores de interés
 sectores_sel <- c("A","B","C","D")  # reemplazá con las letras de tus sectores
 
@@ -206,10 +260,35 @@ p_lineas <- ggplot(serie_letra_fecha,
   labs(title = "Evolución salarios / promedio nacional",
        subtitle = "A precios constantes de Junio 2025",
        x = "", y = "Ratio") +
-  theme_minimal()
+  theme_minimal()+
+  theme(
+    legend.position = "bottom",          # debajo del gráfico
+    legend.direction = "horizontal",     # horizontal
+    legend.box = "horizontal",           # caja horizontal
+    legend.title = element_text(size = 7, face = "bold"),
+    legend.text  = element_text(size = 5)
+  )
 
 ggplotly(p_lineas, tooltip = "text")
 
 
 ```
 
+Filtra sectores de interés y calcula el salario promedio mensual por sector.
+
+Calcula el ratio respecto al salario promedio nacional.
+
+Añade descripciones de sectores y genera gráfico interactivo de líneas (ggplotly) mostrando la evolución de cada sector y el promedio nacional.
+
+La línea y=1 representa el promedio nacional y sirve como referencia.
+
+# ============================
+
+# Análisis y conclusión
+
+# ============================
+
+En el mapa coroplético podemos ver el promedio del salario por departamento para la serie que va desde 20144 hasta octubre de 2023, que muestra el salario bruto percibido por todo concepto de los trabajadores privados registrados, todo a precios de junio de 2025 de modo de que no se pondere más a los salarios relativamente mas recientes y con una ponderacion sesgada hacia arriba por el efecto de la nominalidad. Vemos que a precios constantes, en promedio el salario registrado se distribuye de manera heterogénea entre departamentos, oscilando entre los \$500.000 y los \$3.500.000 con mayores salarios en promedio hacia la patagonia. Entre los salarios más altos se encuentra un partido de neuquen, probablemente asociado a la mayor representacion del trabajo de petroleo en el caso de neuquen, mientras que la zona patagonica puede tener salarios promedio más altos que otras zonas por el mayor costo de vida asociado a las zonas frías. Asimismo, capital federal y gran buenos aires gozan de salarios mas altos probablemente por ser ciudad portuaria centro administrativo y financiero nacional. Sin embargo pueden perderse de vista grandes centros urbanos por las subdivisiones de análisis.\
+En el caso de los sectores de actividad nomenclados con el CLAE, tomando de referencia todos los departamentos del país, y promediando a precios de junio de 2025 la serie disponible, notamos que el sector de menor salario fue el de servicios de alojamiento y servicios de comida, seguido de enseñanza, actividades administrativas, agricultura ganaderia y salvicultura, y en quinto lugar servicios inmobiliarios oscilando entre 983.000 y 1.238.000 pesos percibidos (bruto).\
+
+Finalmente, al normalizar mes a mes la serie de los sectores elegidos para sectores agricultura suministro de electricidad y gas, explotacion de minas y canteras, e industria, notamos que en linea con las nociones que muestran los primeros datos sobre los salarios relativos, notamos que energia, minas y canteras se encuentra entre 2 y 2,5 veces en promedio por encima del promedio nacional para cada mes. Llamativamente notamos una gran similitud entre el promedio del salario nacional y el salario de la industria manufacturera. Mientras que por su parte el salario del sector agricultura ganaderia pesca y salvicultura se acerca al promedio en los ultimos 6 años, aumentando junto con todas las series la volatilidad.
